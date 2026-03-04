@@ -2,12 +2,13 @@
 	email = fang.nicholas@gmail.com
 	name = Nick Fang
 [alias]
-bl = branch -v --sort=-committerdate
-bl2 = for-each-ref --sort=-committerdate refs/heads/ --format='%(refname) %(committerdate) %(authorname)'
-fomm = fetch origin main:main
-hist = log --pretty=format:\"%Cred%h%Creset %Cgreen(%cr %an)%Creset | %s%d\" --graph --date=short --decorate
-hist2 = log --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr %an)%Creset' --abbrev-commit --date=relative --graph
-lola = log --graph --decorate --pretty=oneline --abbrev-commit --all
-pom = pull origin main
+   bl = branch -v --sort=-committerdate
+   bl2 = for-each-ref --sort=-committerdate refs/heads/ --format='%(refname) %(committerdate) %(authorname)'
+   fomm = fetch origin main:main
+   hist = log --pretty=format:\"%Cred%h%Creset %Cgreen(%cr %an)%Creset | %s%d\" --graph --date=short --decorate
+   hist2 = log --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr %an)%Creset' --abbrev-commit --date=relative --graph
+   lola = log --graph --decorate --pretty=oneline --abbrev-commit --all
+   pom = pull origin main
+   alias = "!f() { git config --list | grep '^alias\\.' | sed 's/^alias\\.//; s/=/ = /'; }; f"
 [http]
 	postBuffer = 157286400
