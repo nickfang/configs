@@ -9,6 +9,16 @@
    hist2 = log --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr %an)%Creset' --abbrev-commit --date=relative --graph
    lola = log --graph --decorate --pretty=oneline --abbrev-commit --all
    pom = pull origin main
+   # git stale 7d, git stale 1m, git stale 1y (defaults to 1y)
+   stale = "!f() { \
+      cutoff=$(date -v-${1:-1y} +%s 2>/dev/null || date -d \"${1:-1 year} ago\" +%s); \
+      git for-each-ref --format='%(committerdate:unix) %(refname:short)' refs/heads/ \
+         | awk -v c=$cutoff '$1 < c && $2 != \"main\" && $2 != \"master\" {print $2}'; \
+   }; f"
+
+   prune-stale-week  = "!git stale 7d | xargs -n1 git branch -d"
+   prune-stale-month = "!git stale 1m | xargs -n1 git branch -d"
+   prune-stale-year  = "!git stale 1y | xargs -n1 git branch -d"
    alias = "!f() { git config --list | grep '^alias\\.' | sed 's/^alias\\.//; s/=/ = /'; }; f"
 [http]
 	postBuffer = 157286400
