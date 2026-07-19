@@ -7,3 +7,4 @@ git_branch_name() {
     branch=$(git symbolic-ref --short HEAD 2>/dev/null)
     [ -n "$branch" ] && echo " - ($branch)"
 }
+export PROMPT_DIRTRIM=2
