@@ -1,6 +1,8 @@
 # shell/common.sh — shell-agnostic config, sourced by both bash and zsh.
 # Keep everything here POSIX-ish so it works in both shells.
 
+alias lsa='ls -la'
+
 # Print " - (branch)" if inside a git repo, nothing otherwise (used in the prompt).
 git_branch_name() {
     local branch
