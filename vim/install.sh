@@ -56,3 +56,14 @@ else
       echo "done: removed stale ~/.vim/go.vim"
    fi
 fi
+
+# Install/refresh plugins 
+if command -v vim >/dev/null 2>&1; then
+  if vim +PlugInstall +qall >/dev/null 2>&1; then
+    echo "done: plugins installed (:PlugInstall)"
+  else
+    echo "warn: headless :PlugInstall failed - run :PlugInstall inside vim"
+  fi
+fi
+
+echo "All done.  Open vim to verify."
