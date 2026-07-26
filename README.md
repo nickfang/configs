@@ -1,10 +1,13 @@
 # configs
 My configuration files.
 
-## .vimrc
+## vim
 ```
-cp .vimrc ~/
+cd vim && ./install.sh
 ```
+Symlinks `.vimrc` + the `atoll` colorscheme into place (and vim-go config when
+`go` is installed). See [vim/README.md](vim/README.md) for options, and
+[vim/TUTORIAL.md](vim/TUTORIAL.md) to build the installer from scratch.
 
 ## tmux.conf
 ```

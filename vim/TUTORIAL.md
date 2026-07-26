@@ -1,52 +1,69 @@
 # Building the vim installer — a type-it-yourself tutorial
 
-This walks you through creating the whole setup from scratch: splitting `.vimrc`,
-writing `go.vim`, and building `install.sh` line by line. Type each piece
-yourself and read the notes — the goal is that you understand *why* every line is
-there, not just that it works.
+This walks you through creating the whole vim setup from scratch: splitting
+`.vimrc`, writing `go.vim`, building a shared `lib/install-common.sh`, and a thin
+`vim/install.sh` on top of it. **Type each piece yourself** and read the notes —
+the goal is that you understand *why* every line is there.
 
 By the end you'll have:
 
 ```
-vim/
-  .vimrc        # base editor config (no Go specifics)
-  go.vim        # Go/vim-go config, loaded conditionally
-  atoll.vim     # colorscheme (already exists)
-  install.sh    # the idempotent symlink installer
-  README.md     # user-facing docs
+configs/
+  lib/
+    install-common.sh   # shared install helpers (link / append_once / pick_rc)
+  vim/
+    .vimrc              # base editor config (no Go specifics)
+    go.vim              # Go/vim-go config, loaded conditionally
+    atoll.vim           # colorscheme (already exists)
+    install.sh          # thin, standalone installer that sources the lib
+    README.md           # user-facing docs
 ```
 
 ---
 
 ## Part 0 — The mental model
 
-Three design choices drive everything. Understand these first.
+Five design choices drive everything. Understand these first; the code just
+serves them.
 
-**1. Symlink, not copy.** `~/.vimrc` will be a *symbolic link* pointing at the
-repo's `.vimrc`. Editing either one edits the same bytes. This is why there's
-nothing to "copy back" — the home file and the repo file are literally the same
-file. A plain `cp` would give you two independent copies that drift apart.
+**1. Symlink, not copy.** `~/.vimrc` will be a *symbolic link* to the repo's
+`.vimrc`. Editing either edits the same bytes, so there's nothing to "copy back"
+and no drift. (A `cp` gives you two files that quietly diverge — which is exactly
+what bit you when a `mv ~/.vimrc` orphaned the home copy.)
 
-**2. Conditional Go config.** The vim-go plugin is useless (and its binary
-installer errors) on a machine without the Go toolchain. So the Go-specific lines
-live in a separate `go.vim`, and `.vimrc` loads it *only if that file exists*. The
-installer creates the `go.vim` link only when `go` is on PATH. Result: one
-`.vimrc` that works everywhere.
+**2. Conditional Go config.** vim-go is useless — and its binary installer
+errors — on a machine without the Go toolchain. So the Go-specific lines live in
+a separate `go.vim`, and `.vimrc` loads it *only if it exists*. The installer
+creates that file (a symlink) only when `go` is on PATH. One `.vimrc`, works
+everywhere.
 
 **3. vim-plug has exactly one `plug#begin()`…`plug#end()` block.** Every `Plug`
-command must run *between* those two calls. That constraint is the reason we
-`source ~/.vim/go.vim` from *inside* the block rather than tacking it on the end —
-`go.vim` contains a `Plug` line, and it has to execute in that window.
+command must run *between* those calls. That's why we `source ~/.vim/go.vim` from
+*inside* the block — `go.vim` contains a `Plug` line that has to execute there.
 
-Keep these three in mind; each file below exists to serve one of them.
+**4. Standalone modules + a shared lib.** Each config (`vim/`, `shell/`, `tmux/`)
+installs independently: update one, run just its installer. So `vim/install.sh`
+must **not** depend on a *peer* module (e.g. it can't read `shell/`'s files —
+that'd make "install vim" secretly require "install shell"). But the mechanical
+plumbing — symlinking, editing rc files — is identical across modules, so it
+lives in a repo-level **`lib/install-common.sh`** that each installer sources.
+That's *shared infrastructure*, not a peer dependency: the repo (hence `lib/`) is
+always checked out together, so running `vim/install.sh` alone still works.
+
+**5. `--shell` selects the rc file.** vim-go needs `$GOPATH/bin` on your PATH.
+That's a per-shell edit (`~/.bashrc` vs `~/.zshrc`), which maps to OS
+(Linux→bash, Mac→zsh). Rather than guess, the installer takes `--shell bash|zsh`
+(default: detect from `$SHELL`). This is the flag your future orchestrator will
+pass to every module.
+
+Keep these five in mind. Every file below exists to serve one of them.
 
 ---
 
 ## Part 1 — Split `.vimrc` into base + Go
 
-Right now `.vimrc` mixes base editor settings with vim-go settings. Separate them.
-
-Open `.vimrc` and make it look like this — **base config only**:
+Open `.vimrc` and reduce it to **base config only** — the vim-go plugin line and
+the `g:go_*` settings move out to `go.vim` in Part 2:
 
 ```vim
 " Symlinked to ~/.vimrc by install.sh (do not copy — edits are versioned).
@@ -78,26 +95,23 @@ endif
 call plug#end()
 ```
 
-What changed and why:
+What matters here:
 
-- **The vim-go `Plug` line and the `g:go_*` settings are gone** — they move to
-  `go.vim` in Part 2.
 - **`if filereadable(expand('~/.vim/go.vim'))`** — `expand()` turns `~` into your
-  real home path; `filereadable()` returns true only if that file exists. This is
-  the runtime half of the conditional. The install-time half is the installer
-  choosing whether to create the link.
-- **`source` sits inside `plug#begin`/`plug#end`** — per Part 0 point 3, so the
-  `Plug` line in `go.vim` runs in the valid window.
+  real home path; `filereadable()` is true only if that file exists. This is the
+  *runtime* half of the conditional. The *install-time* half is the installer
+  deciding whether to create the link.
+- **`source` sits inside `plug#begin`/`plug#end`** — per mental-model point 3, so
+  the `Plug` line in `go.vim` runs in the valid window.
 
 > **Sidebar — `has('nvim') ? … : …`.** Vim's ternary. The bootstrap picks the
-> right plugin directory for Neovim vs. Vim. You're on Vim, so `data_dir` is
-> `~/.vim`. Left as-is for portability.
+> right plugin directory for Neovim vs. Vim. On Vim, `data_dir` is `~/.vim`.
 
 ---
 
 ## Part 2 — Create `go.vim`
 
-New file, `go.vim`. This is everything Go-specific, and nothing else:
+New file, `vim/go.vim`. Everything Go-specific, nothing else:
 
 ```vim
 " Go tooling. Sourced by .vimrc ONLY when `go` is installed (installer links
@@ -109,68 +123,40 @@ let g:go_fmt_autosave = 1            " run it automatically on :w
 
 Notes:
 
-- **`Plug 'fatih/vim-go'`** — the plugin. `fatih` (not `faith`); the author is
-  Fatih Arslan. The `{ 'do': ':GoUpdateBinaries' }` hook runs after the plugin
-  installs/updates and tries to fetch vim-go's helper binaries.
+- **`Plug 'fatih/vim-go'`** — `fatih`, not `faith` (author is Fatih Arslan). The
+  `{ 'do': ':GoUpdateBinaries' }` hook runs after install/update to fetch vim-go's
+  helper binaries.
 - **`g:go_fmt_command = "goimports"`** — `goimports` is `gofmt` plus automatic
-  import management (adds what you use, removes what you don't). Set to `"gofmt"`
-  if you'd rather it never touch imports.
-- **`g:go_fmt_autosave = 1`** — the original file had this misspelled
-  `go_fmr_autosave`, which silently did nothing (Vim doesn't error on unknown
-  `g:` variables — same "typo = no-op" trap as undefined refs elsewhere). This is
-  the corrected name.
+  import management. Use `"gofmt"` if you'd rather it never touch imports.
+- **`g:go_fmt_autosave = 1`** — the original file misspelled this
+  `go_fmr_autosave`, which silently did nothing (Vim doesn't error on an unknown
+  `g:` variable). This is the corrected name.
 
 ---
 
-## Part 3 — Build `install.sh` in stages
+## Part 3 — Build the shared `lib/install-common.sh`
 
-We'll assemble the installer piece by piece. Type each stage, read the notes, and
-by the end you'll have the whole script. Create `install.sh` and start with the
-header.
+Create `configs/lib/install-common.sh`. This is the reusable plumbing every
+module's installer will source — the symlink and rc-editing mechanics live here
+once, so each `install.sh` just *declares* what to do.
 
-### Stage 3.1 — Header and strict mode
+Type it in three functions.
 
-```bash
-#!/usr/bin/env bash
-#
-# install.sh — link the versioned vim config into place.
-#
-# Symlinks (never copies) so edits stay under version control. Idempotent:
-# re-running is safe and never stacks backups for links it already owns.
-#
-set -euo pipefail
-```
-
-- **`#!/usr/bin/env bash`** — the shebang. `env` finds `bash` on `PATH` rather
-  than hardcoding `/bin/bash`. Matches the repo's other scripts.
-- **`set -euo pipefail`** — the three-part safety belt:
-  - `-e` — exit immediately if any command fails (non-zero exit).
-  - `-u` — error on use of an *unset* variable (catches typos like `$destt`).
-  - `-o pipefail` — a pipeline fails if *any* stage fails, not just the last one.
-
-  Without these, a script barrels on after errors and can do real damage. With
-  them, it stops at the first sign of trouble.
-
-### Stage 3.2 — Find the repo directory
+### 3.1 — The header
 
 ```bash
-# Absolute path to the directory this script lives in (the repo's vim/ dir).
-DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# lib/install-common.sh — shared helpers for the per-module install scripts.
+#
+# SOURCED, not executed:   . "$DIR/../lib/install-common.sh"
+# Defines functions only. The executable installer owns `set -euo pipefail`;
+# a sourced file shouldn't set shell options on the caller.
 ```
 
-This is the idiom for "where am I?" so the script works no matter where you run it
-from. Read it inside-out:
+No shebang, no `set -euo pipefail` — this file is *sourced* into another script,
+never run on its own. Setting shell options here would silently change the
+behavior of whatever sources it.
 
-- **`${BASH_SOURCE[0]}`** — the path to *this script* (more reliable than `$0`).
-- **`dirname …`** — strips the filename, leaving the directory.
-- **`cd … && pwd`** — `cd` there and print the *absolute* path. So even if you ran
-  `./install.sh` or `../vim/install.sh`, `DIR` ends up fully-qualified.
-
-`$(…)` is command substitution — it runs the command and substitutes its output.
-
-### Stage 3.3 — The `link` helper (the heart of it)
-
-This is where the "back up real files but not our own symlinks" logic lives.
+### 3.2 — `link` (symlink with backup)
 
 ```bash
 # link SRC DEST — symlink DEST -> SRC, backing up a pre-existing real file first.
@@ -198,63 +184,142 @@ link() {
 
 Walk through it:
 
-- **`local src="$1" dest="$2"`** — name the two positional arguments. `local`
-  keeps them scoped to the function.
-- **`mkdir -p "$(dirname "$dest")"`** — ensure the parent dir exists (e.g.
-  `~/.vim/colors/`). `-p` means "make parents, and don't error if it already
-  exists".
 - **`[ -L "$dest" ]`** — recall `[` *is a command* (`test`); `-L` asks "is this a
   symlink?". Combined with the `readlink -f` comparison, this says "is `dest`
-  already a link resolving to the same file as `src`?" If so, we're done —
-  **this is what makes re-runs idempotent and stops backup spam.**
+  already a link resolving to the same file as `src`?" If so, we're done — **this
+  is what makes re-runs idempotent and stops backup spam.**
 - **`[ -e "$dest" ] || [ -L "$dest" ]`** — `-e` is "exists (following symlinks)";
-  we also check `-L` explicitly so a *broken* symlink (whose target is gone, so
-  `-e` is false) still gets cleaned up. If either is true, a real file/other link
-  is in the way → move it aside.
+  we also check `-L` explicitly so a *broken* symlink (target gone, so `-e` is
+  false) still gets cleaned up.
 - **`mv "$dest" "$dest.bak.$(date +%s)"`** — the backup. `date +%s` is a Unix
-  timestamp, giving each backup a unique name. **This is the load-bearing safety
-  step**: a naked `ln -sf` would delete your hand-edited `~/.vimrc` with no
-  recovery.
-- **`ln -s "$src" "$dest"`** — finally create the symlink.
+  timestamp for a unique name. **The load-bearing safety step**: a naked
+  `ln -sf` would delete a hand-edited `~/.vimrc` with no recovery.
 
-> **Sidebar — why `[ -L ]` before `[ -e ]`?** The order of the two `if` blocks
-> matters. We check "is it already *our* link?" first and bail early. Only if
-> it's *not* already correct do we reach the backup-and-replace path. Flip them
-> and you'd back up your own symlink on every run.
-
-### Stage 3.4 — Link the always-on files
+### 3.3 — `append_once` (idempotent rc edit)
 
 ```bash
-# Always-on config.
-link "$DIR/.vimrc"    "$HOME/.vimrc"
-link "$DIR/atoll.vim" "$HOME/.vim/colors/atoll.vim"
+# append_once RC MARKER LINE — add LINE to RC once, keyed by MARKER.
+append_once() {
+    local rc="$1" marker="$2" line="$3"
+    if [ ! -e "$rc" ]; then
+        echo "skip: $rc does not exist"
+        return
+    fi
+    if grep -qF "$marker" "$rc"; then
+        echo "ok:   $rc already has marker"
+        return
+    fi
+    {
+        echo ""
+        echo "$marker"
+        echo "$line"
+    } >> "$rc"
+    echo "done: appended to $rc"
+}
 ```
 
-Two calls to the helper. `atoll.vim` currently exists in `~/.vim/colors/` as a
-*real* file, so the first run will print a `bak:` line for it — expected.
+- **`grep -qF "$marker" "$rc"`** — `-q` quiet (exit status only), `-F` fixed
+  string (so `$` in the marker isn't a regex). If the marker line is already
+  present, do nothing → **idempotent**: running the installer ten times adds the
+  line once. This is the same anti-duplicate trick `shell/install.sh` uses.
+- **`{ …; } >> "$rc"`** — group the echoes and append their combined output in one
+  redirect.
 
-### Stage 3.5 — Conditional Go setup
+### 3.4 — `pick_rc` (the mac/linux selector)
 
 ```bash
-# Go config only when the toolchain is present.
+# pick_rc [bash|zsh] — echo the rc path for a shell; default from $SHELL.
+pick_rc() {
+    local shell="${1:-$(basename "${SHELL:-bash}")}"
+    case "$shell" in
+        zsh) echo "$HOME/.zshrc" ;;
+        *)   echo "$HOME/.bashrc" ;;
+    esac
+}
+```
+
+This is the *only* OS-aware piece, and it's tiny: map a shell name to its rc file,
+defaulting to whatever `$SHELL` says. `${1:-...}` uses the argument if given, else
+the default. Linux→bash→`~/.bashrc`, Mac→zsh→`~/.zshrc`.
+
+> **Why a lib at all?** `link` and `append_once` are needed by *every* module
+> (they all symlink dotfiles and some edit rc files). Putting them here means
+> `vim/install.sh`, and later `shell/`/`tmux/`, share one implementation and one
+> flag contract — which is what will let the future orchestrator stay a dumb
+> dispatcher. Sourcing this lib is *shared infrastructure*, not a dependency on
+> another feature module, so it doesn't violate the standalone rule.
+
+---
+
+## Part 4 — Build the thin `vim/install.sh`
+
+Now the installer itself. Because the mechanics live in the lib, this file is
+mostly *declarations*. Create `vim/install.sh`.
+
+### 4.1 — Header, strict mode, source the lib
+
+```bash
+#!/usr/bin/env bash
+#
+# install.sh — install the vim config (symlinks + plugins). Standalone.
+#
+# Usage: ./install.sh [--shell bash|zsh] [--no-path]
+#   --shell NAME   which rc gets $GOPATH/bin on PATH (default: detect from $SHELL)
+#   --no-path      symlinks + plugins only; touch no rc file
+#
+set -euo pipefail
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$DIR/../lib/install-common.sh"
+```
+
+- **`#!/usr/bin/env bash`** — shebang via `env` (note: `usr`, not `user` — that
+  typo gives "cannot execute: required file not found").
+- **`set -euo pipefail`** — `-e` exit on error, `-u` error on unset variable,
+  `-o pipefail` a pipeline fails if any stage does. Lives *here*, in the
+  executable, not in the sourced lib.
+- **`DIR=…`** — the "where am I?" idiom: `BASH_SOURCE[0]` is this script,
+  `dirname` strips to its directory, `cd … && pwd` makes it absolute. So the
+  script works no matter where you invoke it from.
+- **`. "$DIR/../lib/install-common.sh"`** — source the lib (`.` is `source`).
+  `link`, `append_once`, `pick_rc` are now available.
+
+### 4.2 — Parse arguments
+
+```bash
+shell_arg=""
+no_path=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --shell)   shell_arg="$2"; shift 2 ;;
+        --no-path) no_path=1;      shift ;;
+        -h|--help) grep '^#' "$0" | cut -c3- ; exit 0 ;;
+        *) echo "unknown option: $1" >&2; exit 2 ;;
+    esac
+done
+rc="$(pick_rc "$shell_arg")"
+```
+
+A standard arg loop. `shift 2` consumes both `--shell` and its value; `shift`
+consumes a lone flag. `pick_rc "$shell_arg"` resolves to `~/.bashrc` or
+`~/.zshrc` (empty `shell_arg` → detect from `$SHELL`).
+
+### 4.3 — The declarations
+
+```bash
+# --- always-on config ---
+link "$DIR/.vimrc"    "$HOME/.vimrc"
+link "$DIR/atoll.vim" "$HOME/.vim/colors/atoll.vim"
+
+# --- Go config, only when the toolchain is present ---
 if command -v go >/dev/null 2>&1; then
     link "$DIR/go.vim" "$HOME/.vim/go.vim"
-
-    # Put $GOPATH/bin on PATH so vim-go finds goimports/gopls.
-    marker="# configs/vim: \$GOPATH/bin on PATH"
-    if [ -f "$HOME/.bashrc" ] && ! grep -qF "$marker" "$HOME/.bashrc"; then
-        {
-            echo ""
-            echo "$marker"
-            echo 'export PATH="$PATH:$(go env GOPATH)/bin"'
-        } >> "$HOME/.bashrc"
-        echo "done: added \$GOPATH/bin to PATH in ~/.bashrc"
-    else
-        echo "ok:   ~/.bashrc PATH already set (or no ~/.bashrc)"
+    if [ "$no_path" -eq 0 ]; then
+        append_once "$rc" '# configs/vim: $GOPATH/bin on PATH' \
+            'export PATH="$PATH:${GOPATH:-$HOME/go}/bin"'
     fi
 else
-    echo "skip: go not found — Go config and PATH left out"
-    # Drop a stale link so the vimrc's filereadable() guard stays honest.
+    echo "skip: go not found — Go config left out"
     if [ -L "$HOME/.vim/go.vim" ]; then
         rm "$HOME/.vim/go.vim"
         echo "done: removed stale ~/.vim/go.vim"
@@ -262,35 +327,22 @@ else
 fi
 ```
 
-The important ideas:
+The whole installer's logic is now readable at a glance:
 
-- **`command -v go >/dev/null 2>&1`** — "is `go` on PATH?" `command -v` prints the
-  path if found and exits 0, else exits 1. We redirect its output to `/dev/null`
-  (both stdout `>` and stderr `2>&1`) because we only care about the exit code,
-  which is what `if` branches on. **This one check drives the whole conditional
-  split** — it's the install-time decision that pairs with the `filereadable()`
-  runtime check in `.vimrc`.
-- **The `marker` + `grep -qF` guard** — idempotency for the PATH edit. `grep -qF`
-  looks for the literal marker line (`-q` quiet, `-F` fixed-string so `$` isn't a
-  regex). We append the export block *only if the marker isn't already there*, so
-  running the installer ten times adds the line once. This mirrors how
-  `shell/install.sh` avoids duplicate `source` lines.
-- **`{ …; } >> file`** — group several `echo`s and append their combined output to
-  `~/.bashrc` in one redirect.
-- **Deferred evaluation** — we write the *literal* string
-  `export PATH="$PATH:$(go env GOPATH)/bin"` (single-quoted, so `$(…)` is **not**
-  expanded now). It gets evaluated fresh each time a new shell sources `.bashrc`.
-  That's more robust than baking in today's absolute path.
-- **The `else` branch** cleans up a stale `~/.vim/go.vim` link. Imagine you run
-  this on a Go machine, then later on one without Go (or after uninstalling Go):
-  removing the link makes `.vimrc`'s `filereadable()` check correctly return
-  false, so no Go config loads.
+- **`command -v go >/dev/null 2>&1`** — "is `go` on PATH?" (`command -v` prints
+  the path and exits 0 if found; output redirected away since we only want the
+  exit code). This is the install-time half of the conditional split.
+- **`append_once "$rc" '<marker>' '<export line>'`** — puts `$GOPATH/bin` on the
+  chosen shell's PATH. Note the single quotes: the `$(go env GOPATH)`-free form
+  `${GOPATH:-$HOME/go}` is written *literally* into the rc file so it re-resolves
+  each shell start (and doesn't spawn `go` on every prompt).
+- **`else` branch** removes a stale `~/.vim/go.vim` link, so `.vimrc`'s
+  `filereadable()` guard correctly loads no Go config on a machine without Go.
 
-### Stage 3.6 — Install plugins headlessly
+### 4.4 — Install plugins, best-effort
 
 ```bash
-# Install/refresh plugins without opening an interactive vim. Best-effort:
-# vim-go's post-update hook can hit a transient sum.golang.org error.
+# --- plugins (best-effort) ---
 if command -v vim >/dev/null 2>&1; then
     if vim +PlugInstall +qall >/dev/null 2>&1; then
         echo "done: plugins installed (:PlugInstall)"
@@ -302,73 +354,84 @@ fi
 echo "All set. Open a new shell, then launch vim to verify."
 ```
 
-- **`vim +PlugInstall +qall`** — launch Vim, run the `:PlugInstall` command, then
-  `:qall` (quit all). The `+cmd` form runs Ex commands at startup — a normal way
-  to script Vim non-interactively.
-- **Best-effort by design.** vim-go's `{ 'do': ':GoUpdateBinaries' }` hook may try
-  to fetch helper binaries pinned to `@master`, which can `500` against
-  `sum.golang.org`. That failure shouldn't fail the whole install, so we catch it
-  and print a `warn:` telling you to finish inside Vim (or use the `@latest` trick
-  from the README). Your binaries are likely already installed anyway.
+- **`vim +PlugInstall +qall`** — launch Vim, run `:PlugInstall`, then quit. The
+  `+cmd` form runs Ex commands at startup.
+- **Best-effort.** vim-go's `{ 'do': ':GoUpdateBinaries' }` hook can try to fetch
+  helper binaries pinned to `@master`, which occasionally `500`s against
+  `sum.golang.org`. That shouldn't fail the whole install, so we swallow it and
+  print a `warn:`. (The README documents the `@latest` fix.)
 
-Now make it executable:
+Finally, make it executable:
 
 ```bash
 chmod +x install.sh
 ```
 
----
-
-## Part 4 — Write the README
-
-Create `README.md` documenting the finished setup for a future you (or anyone
-else): the file→link table, `./install.sh`, the Go-conditional behavior, and the
-troubleshooting entries — especially the `goimports@latest` fix for the
-`sum.golang.org 500`. (A complete `README.md` is already in this directory; read
-it as the reference for what good docs for this cover.)
+> **Note — vim-go finds its tools even without the PATH edit.** vim-go appends
+> `$GOPATH/bin` to `$PATH` *inside Vim* when it runs a tool (see its
+> `autoload/go/path.vim` `CheckBinPath`). So format-on-save works even under
+> `--no-path`. The rc edit is for using `goimports`/`gopls`/`dlv` from your
+> *shell* and other programs — a broader, persistent need.
 
 ---
 
-## Part 5 — Run it and verify
+## Part 5 — Write the README
+
+Document the finished setup for future-you: the file→link table, `./install.sh`
+with `--shell`/`--no-path`, the Go-conditional behavior, and troubleshooting —
+especially the `goimports@latest` fix for the `sum.golang.org 500`. A complete
+`README.md` already sits in this directory; read it as the reference for what good
+docs here look like.
+
+---
+
+## Part 6 — Run it and verify
 
 ```bash
 cd ~/workspace/configs/vim
-./install.sh
+./install.sh                 # --shell defaults to your $SHELL (bash on Linux)
 ```
 
-Expect: a `bak:` line for the existing real `~/.vim/colors/atoll.vim`, `done:`
-links for `.vimrc`, `atoll.vim`, and `go.vim`, and the PATH line added to
-`~/.bashrc`.
+Expect a `bak:` line for the existing real `~/.vim/colors/atoll.vim`, and `done:`
+links for `.vimrc`, `atoll.vim`, `go.vim`, plus the PATH line added to `~/.bashrc`.
 
 Checks:
 
 1. **Links are real:** `ls -l ~/.vimrc ~/.vim/colors/atoll.vim ~/.vim/go.vim` —
-   each should show `-> …/configs/vim/…`.
-2. **Idempotent:** run `./install.sh` again — every line should now be `ok:`, and
-   no new `.bak` files appear.
-3. **PATH:** `source ~/.bashrc && command -v goimports` — resolves under
+   each shows `-> …/configs/vim/…`.
+2. **Idempotent:** run `./install.sh` again — every line `ok:`, no new `.bak`
+   files, no duplicate PATH line (the marker guard).
+3. **Shell targeting:** `./install.sh --shell zsh` → the PATH line lands in
+   `~/.zshrc`. `./install.sh --no-path` → no rc file touched.
+4. **PATH works:** `source ~/.bashrc && command -v goimports` → resolves under
    `$GOPATH/bin`.
-4. **Format-on-save:** open a `.go` file, add a stray indent and a
-   missing-but-used import, `:w` — it reformats and fixes imports. This proves
-   `go.vim` loaded *and* the `go_fmt_autosave` typo is fixed.
-5. **The conditional actually gates:** `mv ~/.vim/go.vim{,.off}`, reopen Vim — no
-   Go config, no error (the `filereadable()` guard did its job). Restore by
-   re-running `./install.sh`.
+5. **Format-on-save:** open a `.go` file, add a stray indent and a
+   missing-but-used import, `:w` — it reformats and fixes imports. Proves `go.vim`
+   loaded *and* the `go_fmt_autosave` typo is fixed.
+6. **The conditional gates:** `mv ~/.vim/go.vim{,.off}`, reopen Vim — no Go
+   config, no error (the `filereadable()` guard). Restore by re-running the
+   installer.
 
 ---
 
 ## What you learned
 
-- **Symlinks vs. copies**, and why a dotfiles repo prefers links (no drift, and a
+- **Symlinks vs. copies**, and why a dotfiles repo prefers links (no drift, a
   stray `mv` can't orphan your config).
-- **`[`/`test` and exit codes** — `-L`, `-e`, `-f`, and how `if` branches on exit
-  status, not on any printed value.
-- **Idempotency patterns** — the `-L` + `readlink` "already correct?" check, and
-  the `grep -qF` marker guard for editing rc files without duplicating lines.
-- **`set -euo pipefail`** and the `BASH_SOURCE`/`dirname`/`pwd` "where am I" idiom.
-- **Deferred evaluation** — writing a literal `$(…)` into `.bashrc` so it
-  re-resolves per shell.
+- **`[`/`test` and exit codes** — `-L`, `-e`, `-f`, and how `if`/`&&` branch on
+  exit status, not on any printed value.
+- **Idempotency patterns** — the `-L` + `readlink` "already correct?" check and
+  the `grep -qF` marker guard for editing rc files without duplication.
+- **Sourced lib vs. executable script** — why `set -euo pipefail` and the shebang
+  live in `install.sh` but not in `lib/install-common.sh`, and how `.`/`source`
+  pulls the helpers in.
+- **Standalone modules + shared infrastructure** — the difference between
+  depending on a *peer module* (bad: couples installs) and sourcing a repo-level
+  *lib* (fine: shared plumbing), and why that keeps "update one config, run one
+  installer" true.
 - **Two-sided conditional config** — an install-time `command -v go` check paired
   with a runtime `filereadable()` guard, so one `.vimrc` adapts to any machine.
-- **Vim scripting** — `+PlugInstall +qall`, `filereadable`/`expand`, and why the
+- **`--shell` / `pick_rc`** — mapping OS→shell→rc in one small function, the same
+  flag every module and the future orchestrator will speak.
+- **Vim scripting** — `+PlugInstall +qall`, `filereadable`/`expand`, and why
   `source` must sit inside vim-plug's single `begin`/`end` block.
