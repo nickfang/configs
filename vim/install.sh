@@ -7,11 +7,9 @@ set -euo pipefail
 
 # Absolute path to the directory this script livs in.
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-echo $DIR
 
 link() {
    local src="$1" dest="$2"
-   echo "src: $src, dest: $dest"
    mkdir -p "$(dirname "$dest")"
 
    # Symlink exists and pointed to the right target
