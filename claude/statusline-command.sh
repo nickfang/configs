@@ -3,13 +3,9 @@
 
 input=$(cat)
 cwd=$(echo "$input" | jq -r '.workspace.current_dir // .cwd // empty')
-echo $cwd
 dir=$(basename "$cwd")
-echo $dir
 
 model=$(echo "$input" | jq -r '.model.display_name // empty')
-
-echo $model
 
 branch=""
 if [ -n "$cwd" ]; then
@@ -21,7 +17,7 @@ remaining=$(echo "$input" | jq -r '.context_window.remaining_percentage // empty
 
 out=""
 [ -n "$dir" ]       && out="$dir"
-[ -n "$branch" ]    && out="${out:+$out | }$branch"
+[ -n "$branch" ]    && out="${out:+$out }($branch)"
 [ -n "$model" ]     && out="${out:+$out | }$model"
 [ -n "$remaining" ] && out="${out:+$out | }$remaining% left"
 printf "%s" "$out"
