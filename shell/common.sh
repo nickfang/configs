@@ -2,6 +2,8 @@
 # Keep everything here POSIX-ish so it works in both shells.
 
 alias lsa='ls -la'
+alias hl='rg --passthru'
+alias slowcat='pv -l -L 10 -q'
 
 # Print " - (branch)" if inside a git repo, nothing otherwise (used in the prompt).
 git_branch_name() {
