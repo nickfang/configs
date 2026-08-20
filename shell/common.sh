@@ -1,6 +1,9 @@
 # shell/common.sh — shell-agnostic config, sourced by both bash and zsh.
 # Keep everything here POSIX-ish so it works in both shells.
 
+# Scripts versioned in this repo (xc, ...).
+PATH="$HOME/workspace/configs/shell/bin:$PATH"
+
 alias lsa='ls -la'
 alias hl='rg --passthru'
 alias slowcat='pv -l -L 10 -q'

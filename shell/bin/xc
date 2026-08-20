@@ -1,0 +1,71 @@
+#!/bin/sh
+# xc - Extended Copy
+#      copy a file's contents (or stdin) to the local clipboard, over SSH or not.
+#
+# Nothing here talks to the OS clipboard. The bytes below are an OSC 52 escape
+# sequence, which the terminal emulator sees in the output stream and acts on
+# itself. That is why it needs nothing installed on the remote host, and why the
+# command is identical on the Mac and on a server.
+#
+# Deliberately not it2copy: that sends iTerm2's proprietary OSC 1337, which tmux
+# does not forward unless allow-passthrough is on.
+#
+# Requires:
+#   iTerm2   Settings > General > Selection >
+#            "Applications in terminal may access clipboard"
+#   tmux     set -g set-clipboard on   (already in this repo's tmux.conf)
+#
+# Payload size is capped by both the terminal and tmux, so this is for text.
+# Use scp for anything large.
+#
+#
+# How it works, one pipe stage at a time:
+#
+#   cat -- "$@"    Read the named files. With no arguments, read stdin.
+#                  The -- stops option parsing, so a file named -n works.
+#
+#   base64         OSC 52 requires a base64 payload. It also makes arbitrary
+#                  bytes safe to embed in an escape sequence.
+#
+#   tr -d '\n'     Strip line breaks. macOS base64 wraps at 76 columns, and a
+#                  newline inside the sequence would terminate it early. GNU
+#                  base64 has -w0 for this, but it is not portable.
+#
+#   printf/cat     Wrap the payload in the escape sequence:
+#                    \033]  ESC ], which starts an OSC
+#                    52     the clipboard command
+#                    c      which selection (c is clipboard, p is primary)
+#                    ;      separator, then the base64 payload
+#                    \a     BEL, terminating the sequence
+#
+# The final stage streams through cat rather than passing the payload as a
+# printf argument, which would hit argument-length limits on a large file.
+
+usage() {
+    cat <<'EOF'
+usage: xc [FILE...]
+       ... | xc
+
+Copy contents or stdin to the local clipboard. Works over SSH.
+
+  -h, --help   show this message
+
+  xc file.txt
+  cat file.txt | xc
+  ls -la | xc
+EOF
+}
+
+case "${1-}" in
+    -h|--help) usage; exit 0 ;;
+esac
+
+# No arguments and nothing piped in means the user just typed `xc`, so help is
+# more useful than hanging on stdin. The -t 0 test is what keeps `cmd | xc`
+# working, since that also arrives with no arguments.
+if [ "$#" -eq 0 ] && [ -t 0 ]; then
+    usage
+    exit 0
+fi
+
+cat -- "$@" | base64 | tr -d '\n' | { printf '\033]52;c;'; cat; printf '\a'; }
