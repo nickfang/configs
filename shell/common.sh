@@ -4,7 +4,7 @@
 # Scripts versioned in this repo (xc, ...).
 PATH="$HOME/workspace/configs/shell/bin:$PATH"
 
-alias lsa='ls -la'
+alias lsa='ls -lah'
 alias hl='rg --passthru'
 alias slowcat='pv -l -L 10 -q'
 
