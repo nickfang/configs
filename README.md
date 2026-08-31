@@ -7,6 +7,7 @@ cd shell && ./install.sh
 ```
 Add aliases and tools
 ### tools
+
 xc - Extended Copy - copy a file's contents (or stdin) to the local clipboard,puts contents of file or piped input on the system clipboard.
 ---
 ## vim
