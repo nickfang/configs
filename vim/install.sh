@@ -36,13 +36,24 @@ else
    fi
 fi
 
-# Install/refresh plugins 
-if command -v vim >/dev/null 2>&1; then
-  if vim +PlugInstall +qall >/dev/null 2>&1; then
-    echo "done: plugins installed (:PlugInstall)"
-  else
-    echo "warn: headless :PlugInstall failed - run :PlugInstall inside vim"
-  fi
+# Install/refresh plugins.
+#
+# Check features, not just the binary: Debian's base install ships only
+# vim-tiny, which is built without +eval and +syntax. The config needs both,
+# and a tiny build fails every `syntax on` / `let` / `call plug#begin()` with
+# E319 on first launch.
+if ! command -v vim >/dev/null 2>&1; then
+   echo "warn: vim not found - config linked, but install vim to use it"
+   echo "      Debian/Ubuntu:  sudo apt install vim"
+elif ! vim --version | grep -q '+eval'; then
+   echo "warn: this vim lacks +eval/+syntax (vim-tiny?) - the config will error on startup"
+   echo "      Debian/Ubuntu:  sudo apt install vim"
+else
+   if vim +PlugInstall +qall >/dev/null; then
+      echo "done: plugins installed (:PlugInstall)"
+   else
+      echo "warn: headless :PlugInstall failed - run :PlugInstall inside vim"
+   fi
 fi
 
 echo "All done.  Open vim to verify."
