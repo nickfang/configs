@@ -5,29 +5,10 @@
 
 set -euo pipefail
 
-# Absolute path to the directory this script livs in.
+# Absolute path to the directory this script lives in.
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-link() {
-   local src="$1" dest="$2"
-   mkdir -p "$(dirname "$dest")"
-
-   # Symlink exists and pointed to the right target
-   if [ -L "$dest" ] && [ "$(readlink -f "$dest")" = "$(readlink -f "$src")" ]; then
-      echo "ok:  $dest already links to repo"
-      return
-   fi
-
-   # back real file or symlink that doesn't point here
-   if [ -e "$dest" ] || [ -L "$dest" ]; then
-      local bak="$dest.bak.$(date +%s)"
-      mv "$dest" "$bak"
-      echo "bak: moved $dest -> $bak"
-   fi
-
-   ln -s "$src" "$dest"
-   echo "done: linked $dest -> src"
-}
+. "$DIR/../lib/common.sh"
 
 link "$DIR/.vimrc" "$HOME/.vimrc"
 link "$DIR/atoll.vim" "$HOME/.vim/colors/atoll.vim"
@@ -49,7 +30,7 @@ if command -v go >/dev/null 2>&1; then
    fi
 else
    echo "skip: go not found - Go config and PATH left out"
-   if [ -L "$HOME/.vim/go.vom" ]; then
+   if [ -L "$HOME/.vim/go.vim" ]; then
       rm "$HOME/.vim/go.vim"
       echo "done: removed stale ~/.vim/go.vim"
    fi

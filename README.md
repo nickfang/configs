@@ -33,11 +33,11 @@ See [vim/README.md](vim/README.md) for options.
 tmux config with the atoll theme.
 
 ```sh
-cp tmux/tmux.conf ~/.config/tmux/tmux.conf
-tmux source ~/.config/tmux/tmux.conf
+cd tmux && ./install.sh
 ```
 
-In tmux press `<prefix> + I` (ctrl + space, then capital I).
+Links `~/.tmux.conf` and `~/.tmux/atoll.tmux.conf`, installs tpm, and fetches plugins.
+If the headless plugin install fails, press `<prefix> + I` (ctrl + space, then capital I).
 
 ---
 
