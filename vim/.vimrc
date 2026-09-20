@@ -1,6 +1,7 @@
 " Copy this file to: ~/
 syntax on
 set number
+set relativenumber
 set tabstop=2        " Set the width of a tab character to 3 columns
 set shiftwidth=2     " Set the number of spaces used for (auto)indentation to 3
 set expandtab        " Use spaces instead of tabs when pressing the <Tab> key
