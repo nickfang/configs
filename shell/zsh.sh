@@ -9,4 +9,4 @@ setopt prompt_subst
 
 # Prompt:  <last 2 path components> - (branch) >
 # No space before $(git_branch_name): the function supplies its own leading space.
-prompt='%2/$(git_branch_name) > '
+prompt='%n@%m:%2/$(git_branch_name) > '
